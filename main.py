@@ -3,7 +3,7 @@ from privacy_agent_protocol import AsyncPeerNode, PrivacyAgent, MerkleTree, Anon
 
 async def main():
     print("==========================================================")
-    print("  TOPIC 9: PRIVACY-PRESERVING MULTI-AGENT PROTOCOL DEMO  ")
+    print("      PRIVACY-PRESERVING MULTI-AGENT PROTOCOL DEMO  ")
     print("==========================================================\n")
 
     # 1. Initialize nodes
@@ -96,5 +96,31 @@ async def main():
     print("\nAll nodes shut down cleanly. Demo complete.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    parser = argparse.ArgumentParser(description="Privacy-Preserving Multi-Agent Communication Protocol")
+    parser.add_argument("--web", action="store_true", help="Launch interactive web visualizer & attack simulator (http://localhost:8000)")
+    parser.add_argument("--cli", action="store_true", help="Launch interactive terminal testing interface")
+    parser.add_argument("--simulate", action="store_true", help="Run interactive attack and privacy simulation in terminal")
+    parser.add_argument("--port", type=int, default=8000, help="Port for web server (default: 8000)")
+
+    args = parser.parse_args()
+
+    if args.web:
+        from web_app import run_server
+        run_server(args.port)
+    elif args.cli:
+        from cli import main_cli
+        asyncio.run(main_cli())
+    elif args.simulate:
+        from cli import interactive_attack_simulation
+        from privacy_agent_protocol.session import ProtocolSession
+        async def _run_sim():
+            session = ProtocolSession()
+            await session.initialize_defaults()
+            await interactive_attack_simulation(session)
+            await session.stop()
+        asyncio.run(_run_sim())
+    else:
+        asyncio.run(main())
+
 

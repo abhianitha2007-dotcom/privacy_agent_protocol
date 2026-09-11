@@ -59,6 +59,8 @@ class NetworkSerializer:
         stealth_pk: Point | None = None,
         ephemeral_stealth_pk: Point | None = None,
         nonce: int = None,
+        encrypted_amount: bytes | None = None,
+        encrypted_msg: bytes | None = None,
     ) -> bytes:
         if nonce is None:
             nonce = secrets.randbits(64)
@@ -71,19 +73,36 @@ class NetworkSerializer:
             "ephemeral_pk": NetworkSerializer.serialize_point(ephemeral_pk),
             "stealth_pk": NetworkSerializer.serialize_point(stealth_pk) if stealth_pk is not None else None,
             "ephemeral_stealth_pk": NetworkSerializer.serialize_point(ephemeral_stealth_pk) if ephemeral_stealth_pk is not None else None,
+            "encrypted_amount": encrypted_amount,
+            "encrypted_msg": encrypted_msg,
         }
         return msgpack.packb(payload)
 
     @staticmethod
-    def deserialize_transfer(payload_bytes: bytes) -> tuple[Point, bytes, Point, Point | None, Point | None, int]:
+    def deserialize_transfer_full(payload_bytes: bytes) -> dict:
         data = msgpack.unpackb(payload_bytes)
-        transfer_commitment = NetworkSerializer.deserialize_point(data["transfer_commitment"])
-        encrypted_r = data["encrypted_r"]
-        ephemeral_pk = NetworkSerializer.deserialize_point(data["ephemeral_pk"])
-        stealth_pk = NetworkSerializer.deserialize_point(data["stealth_pk"]) if data.get("stealth_pk") else None
-        ephemeral_stealth_pk = NetworkSerializer.deserialize_point(data["ephemeral_stealth_pk"]) if data.get("ephemeral_stealth_pk") else None
-        nonce = data["nonce"]
-        return transfer_commitment, encrypted_r, ephemeral_pk, stealth_pk, ephemeral_stealth_pk, nonce
+        return {
+            "transfer_commitment": NetworkSerializer.deserialize_point(data["transfer_commitment"]),
+            "encrypted_r": data["encrypted_r"],
+            "ephemeral_pk": NetworkSerializer.deserialize_point(data["ephemeral_pk"]),
+            "stealth_pk": NetworkSerializer.deserialize_point(data["stealth_pk"]) if data.get("stealth_pk") else None,
+            "ephemeral_stealth_pk": NetworkSerializer.deserialize_point(data["ephemeral_stealth_pk"]) if data.get("ephemeral_stealth_pk") else None,
+            "nonce": data["nonce"],
+            "encrypted_amount": data.get("encrypted_amount"),
+            "encrypted_msg": data.get("encrypted_msg"),
+        }
+
+    @staticmethod
+    def deserialize_transfer(payload_bytes: bytes) -> tuple[Point, bytes, Point, Point | None, Point | None, int]:
+        full = NetworkSerializer.deserialize_transfer_full(payload_bytes)
+        return (
+            full["transfer_commitment"],
+            full["encrypted_r"],
+            full["ephemeral_pk"],
+            full["stealth_pk"],
+            full["ephemeral_stealth_pk"],
+            full["nonce"],
+        )
 
     @staticmethod
     def serialize_ring_auth(challenge: bytes, c0: int, s: list[int]) -> bytes:

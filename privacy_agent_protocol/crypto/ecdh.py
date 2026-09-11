@@ -57,3 +57,22 @@ class ECDH:
         raw_bytes = aesgcm.decrypt(nonce, ciphertext, None)
         return int.from_bytes(raw_bytes, byteorder="big")
 
+    @staticmethod
+    def encrypt_bytes(data: bytes, key: bytes) -> bytes:
+        """Encrypts arbitrary bytes using AES-256-GCM authenticated encryption."""
+        aesgcm = AESGCM(key)
+        nonce = secrets.token_bytes(12)
+        ciphertext = aesgcm.encrypt(nonce, data, None)
+        return nonce + ciphertext
+
+    @staticmethod
+    def decrypt_bytes(encrypted_bytes: bytes, key: bytes) -> bytes:
+        """Decrypts and verifies an AES-256-GCM encrypted byte payload."""
+        if len(encrypted_bytes) < 28:
+            raise ValueError("Invalid ciphertext length: must be at least nonce (12) + tag (16)")
+        nonce = encrypted_bytes[:12]
+        ciphertext = encrypted_bytes[12:]
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ciphertext, None)
+
+

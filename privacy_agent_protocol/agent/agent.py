@@ -21,6 +21,7 @@ class PrivacyAgent:
         self.my_host = "127.0.0.1"
         self.my_port = None
         self.cluster_merkle_root: bytes | None = None
+        self.received_messages: list[dict] = []
 
     def set_endpoint(self, host: str, port: int):
         self.my_host = host
@@ -49,7 +50,9 @@ class PrivacyAgent:
             return True  # If no root enforced, default to open cluster
         return MerkleTree.verify_membership_proof(sender_pk, merkle_proof, self.cluster_merkle_root)
 
-    def prepare_stealth_transfer(self, recipient_pk: Point, amount: int) -> tuple[bytes, Point, Point]:
+    def prepare_stealth_transfer(
+        self, recipient_pk: Point, amount: int, message: str = ""
+    ) -> tuple[bytes, Point, Point]:
         """
         Creates a confidential transfer utilizing:
         1. Stealth Address (Identity Hiding)
@@ -62,6 +65,8 @@ class PrivacyAgent:
         e_sk, e_pk = ECDH.generate_ephemeral_keypair()
         ephemeral_shared_key = ECDH.derive_shared_key(e_sk, stealth_pk)
         encrypted_r = ECDH.encrypt_scalar(transfer_r, ephemeral_shared_key)
+        encrypted_amount = ECDH.encrypt_scalar(amount, ephemeral_shared_key)
+        encrypted_msg = ECDH.encrypt_bytes(message.encode("utf-8"), ephemeral_shared_key) if message else None
         
         payload = NetworkSerializer.serialize_transfer(
             transfer_commitment=transfer_commitment,
@@ -69,14 +74,16 @@ class PrivacyAgent:
             ephemeral_pk=e_pk,
             stealth_pk=stealth_pk,
             ephemeral_stealth_pk=ephemeral_stealth_pk,
+            encrypted_amount=encrypted_amount,
+            encrypted_msg=encrypted_msg,
         )
         return payload, stealth_pk, ephemeral_stealth_pk
 
     async def send_stealth_transfer(
-        self, target_host: str, target_port: int, recipient_pk: Point, amount: int
+        self, target_host: str, target_port: int, recipient_pk: Point, amount: int, message: str = ""
     ) -> tuple[bool, bytes, Point, Point]:
         """Prepares and transmits a confidential stealth transfer over the network socket."""
-        payload, stealth_pk, ephemeral_stealth_pk = self.prepare_stealth_transfer(recipient_pk, amount)
+        payload, stealth_pk, ephemeral_stealth_pk = self.prepare_stealth_transfer(recipient_pk, amount, message)
         success = await AsyncPeerNode.send_payload(target_host, target_port, payload)
         return success, payload, stealth_pk, ephemeral_stealth_pk
 
@@ -87,7 +94,14 @@ class PrivacyAgent:
         stealth_pk: Point | None = None
     ) -> bool:
         """Scans and unlocks funds sent to a stealth address if owned by this agent."""
-        transfer_commitment, encrypted_r, e_pk, wire_stealth_pk, wire_ephemeral_stealth_pk, nonce = NetworkSerializer.deserialize_transfer(payload_bytes)
+        full_data = NetworkSerializer.deserialize_transfer_full(payload_bytes)
+        transfer_commitment = full_data["transfer_commitment"]
+        encrypted_r = full_data["encrypted_r"]
+        e_pk = full_data["ephemeral_pk"]
+        wire_stealth_pk = full_data["stealth_pk"]
+        wire_ephemeral_stealth_pk = full_data["ephemeral_stealth_pk"]
+        encrypted_amount = full_data.get("encrypted_amount")
+        encrypted_msg = full_data.get("encrypted_msg")
         
         target_stealth_pk = stealth_pk or wire_stealth_pk
         target_ephemeral_stealth_pk = ephemeral_stealth_pk or wire_ephemeral_stealth_pk
@@ -110,11 +124,23 @@ class PrivacyAgent:
         ephemeral_shared_key = ECDH.derive_shared_key(stealth_sk, e_pk)
         try:
             transfer_r = ECDH.decrypt_scalar(encrypted_r, ephemeral_shared_key)
+            decrypted_amount = 0
+            if encrypted_amount is not None:
+                decrypted_amount = ECDH.decrypt_scalar(encrypted_amount, ephemeral_shared_key)
+            decrypted_msg = ""
+            if encrypted_msg is not None:
+                decrypted_msg = ECDH.decrypt_bytes(encrypted_msg, ephemeral_shared_key).decode("utf-8", errors="replace")
         except Exception as e:
             print(f"[{self.name}] AEAD verification/decryption failed: {e}")
             return False
         
-        self.account.receive_transfer(transfer_commitment, transfer_r)
+        self.account.receive_transfer(transfer_commitment, transfer_r, decrypted_amount)
+        if decrypted_msg:
+            self.received_messages.append({
+                "tx_hash": tx_hash,
+                "amount": decrypted_amount,
+                "message": decrypted_msg,
+            })
         self.seen_tx_hashes.add(tx_hash)
         return True
 

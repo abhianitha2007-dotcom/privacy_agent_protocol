@@ -8,6 +8,7 @@ class PrivateAccount:
     def __init__(self, initial_balance: int = 0):
         if not (0 <= initial_balance <= MAX_TRANSFER_AMOUNT):
             raise ValueError(f"Initial balance out of valid range [0, 2^64 - 1]")
+        self.balance = initial_balance
         self.pedersen = PedersenCommitment()
         self.commitment, self._blinding_factor = self.pedersen.commit(initial_balance)
 
@@ -19,21 +20,26 @@ class PrivateAccount:
         deposit_commitment, deposit_r = self.pedersen.commit(amount)
         self.commitment = self.pedersen.add_commitments(self.commitment, deposit_commitment)
         self._blinding_factor = self.pedersen.combine_blinding_factors(self._blinding_factor, deposit_r)
+        self.balance += amount
         return deposit_commitment
 
     def withdraw(self, amount: int) -> tuple[Point, int]:
         """Deducts an amount homomorphically after confirming non-negativity."""
         if not (0 <= amount <= MAX_TRANSFER_AMOUNT):
             raise ValueError(f"Withdrawal amount {amount} violates range bounds [0, 2^64 - 1]")
+        if amount > self.balance:
+            raise ValueError(f"Insufficient funds: withdrawal {amount} exceeds balance {self.balance}")
             
         transfer_commitment, transfer_r = self.pedersen.commit(amount)
         self.commitment = self.pedersen.subtract_commitments(self.commitment, transfer_commitment)
         self._blinding_factor = self.pedersen.subtract_blinding_factors(self._blinding_factor, transfer_r)
+        self.balance -= amount
         return transfer_commitment, transfer_r
 
-    def receive_transfer(self, transfer_commitment: Point, transfer_r: int):
+    def receive_transfer(self, transfer_commitment: Point, transfer_r: int, amount: int = 0):
         self.commitment = self.pedersen.add_commitments(self.commitment, transfer_commitment)
         self._blinding_factor = self.pedersen.combine_blinding_factors(self._blinding_factor, transfer_r)
+        self.balance += amount
 
     def verify_balance(self, expected_balance: int) -> bool:
         return self.pedersen.verify(self.commitment, expected_balance, self._blinding_factor)

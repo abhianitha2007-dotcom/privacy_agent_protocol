@@ -5,6 +5,7 @@ from privacy_agent_protocol.crypto.pedersen import PedersenCommitment
 from privacy_agent_protocol.zk.merkle import MerkleTree
 from privacy_agent_protocol.zk.ring import AnonymousRingAuth, RingSignature
 from privacy_agent_protocol.zk.range_proofs import ZKRangeProver
+from privacy_agent_protocol.session import ProtocolSession
 
 __all__ = [
     "PrivacyAgent",
@@ -15,5 +16,7 @@ __all__ = [
     "AnonymousRingAuth",
     "RingSignature",
     "ZKRangeProver",
+    "ProtocolSession",
 ]
+
 
