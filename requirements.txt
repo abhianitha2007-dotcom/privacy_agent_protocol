@@ -5,8 +5,7 @@ iniconfig==2.3.0
 msgpack==1.2.2
 packaging==26.3
 pluggy==1.6.0
-# Editable install with no version control (privacy_agent_protocol==0.1.0)
--e /home/abhi/privacy_agent_protocol
+-e .
 pycparser==3.0
 Pygments==2.21.0
 pytest==9.1.1

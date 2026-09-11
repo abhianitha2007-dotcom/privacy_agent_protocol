@@ -63,18 +63,40 @@ class PrivacyAgent:
         ephemeral_shared_key = ECDH.derive_shared_key(e_sk, stealth_pk)
         encrypted_r = ECDH.encrypt_scalar(transfer_r, ephemeral_shared_key)
         
-        payload = NetworkSerializer.serialize_transfer(transfer_commitment, encrypted_r, e_pk)
+        payload = NetworkSerializer.serialize_transfer(
+            transfer_commitment=transfer_commitment,
+            encrypted_r=encrypted_r,
+            ephemeral_pk=e_pk,
+            stealth_pk=stealth_pk,
+            ephemeral_stealth_pk=ephemeral_stealth_pk,
+        )
         return payload, stealth_pk, ephemeral_stealth_pk
+
+    async def send_stealth_transfer(
+        self, target_host: str, target_port: int, recipient_pk: Point, amount: int
+    ) -> tuple[bool, bytes, Point, Point]:
+        """Prepares and transmits a confidential stealth transfer over the network socket."""
+        payload, stealth_pk, ephemeral_stealth_pk = self.prepare_stealth_transfer(recipient_pk, amount)
+        success = await AsyncPeerNode.send_payload(target_host, target_port, payload)
+        return success, payload, stealth_pk, ephemeral_stealth_pk
 
     def process_stealth_transfer(
         self, 
         payload_bytes: bytes, 
-        ephemeral_stealth_pk: Point, 
-        stealth_pk: Point
+        ephemeral_stealth_pk: Point | None = None, 
+        stealth_pk: Point | None = None
     ) -> bool:
         """Scans and unlocks funds sent to a stealth address if owned by this agent."""
+        transfer_commitment, encrypted_r, e_pk, wire_stealth_pk, wire_ephemeral_stealth_pk, nonce = NetworkSerializer.deserialize_transfer(payload_bytes)
+        
+        target_stealth_pk = stealth_pk or wire_stealth_pk
+        target_ephemeral_stealth_pk = ephemeral_stealth_pk or wire_ephemeral_stealth_pk
+
+        if target_stealth_pk is None or target_ephemeral_stealth_pk is None:
+            return False
+
         is_owner, stealth_sk = StealthAddress.check_and_derive_private_key(
-            self.sk, self.pk, ephemeral_stealth_pk, stealth_pk
+            self.sk, self.pk, target_ephemeral_stealth_pk, target_stealth_pk
         )
         if not is_owner or stealth_sk is None:
             return False
@@ -84,11 +106,13 @@ class PrivacyAgent:
             print(f"[{self.name}] Replay Attack Blocked!")
             return False
 
-        transfer_commitment, encrypted_r, e_pk, nonce = NetworkSerializer.deserialize_transfer(payload_bytes)
-        
         # Derive shared key using single-use stealth private key and ephemeral public key
         ephemeral_shared_key = ECDH.derive_shared_key(stealth_sk, e_pk)
-        transfer_r = ECDH.decrypt_scalar(encrypted_r, ephemeral_shared_key)
+        try:
+            transfer_r = ECDH.decrypt_scalar(encrypted_r, ephemeral_shared_key)
+        except Exception as e:
+            print(f"[{self.name}] AEAD verification/decryption failed: {e}")
+            return False
         
         self.account.receive_transfer(transfer_commitment, transfer_r)
         self.seen_tx_hashes.add(tx_hash)
@@ -107,12 +131,42 @@ class PrivacyAgent:
 
             return {"type": msg_type, "status": "peer_registered", "peer": sender_name}
 
+        elif msg_type == "transfer":
+            settled = self.process_stealth_transfer(payload_bytes)
+            return {
+                "type": "transfer",
+                "status": "settled" if settled else "ignored_not_recipient",
+                "agent": self.name,
+            }
+
         elif msg_type == "proof":
             commitment, is_valid = self.verify_peer_payload(payload_bytes)
             return {"type": "proof", "valid": is_valid}
 
+        elif msg_type == "ring_auth":
+            from privacy_agent_protocol.zk.ring import AnonymousRingAuth, RingSignature
+            challenge, c0, s = NetworkSerializer.deserialize_ring_auth(payload_bytes)
+            ring_verifier = AnonymousRingAuth()
+            cluster_pks = [p.public_key for p in self.cluster.peers.values()] + [self.pk]
+            valid = ring_verifier.verify(challenge, cluster_pks, RingSignature(c0, s))
+            return {"type": "ring_auth", "valid": valid}
+
         else:
             return {"type": "unknown", "status": "ignored"}
+
+    def create_anonymous_auth_token(self, cluster_pks: list[Point], challenge: bytes) -> bytes:
+        """Generates an anonymous ring signature token proving cluster membership without revealing identity."""
+        from privacy_agent_protocol.zk.ring import AnonymousRingAuth
+        prover = AnonymousRingAuth()
+        sig = prover.sign(challenge, cluster_pks, self.sk)
+        return NetworkSerializer.serialize_ring_auth(challenge, sig.c0, sig.s)
+
+    def verify_anonymous_auth_token(self, payload_bytes: bytes, cluster_pks: list[Point]) -> bool:
+        """Verifies an anonymous ring signature token against the cluster public keys."""
+        from privacy_agent_protocol.zk.ring import AnonymousRingAuth, RingSignature
+        challenge, c0, s = NetworkSerializer.deserialize_ring_auth(payload_bytes)
+        verifier = AnonymousRingAuth()
+        return verifier.verify(challenge, cluster_pks, RingSignature(c0, s))
 
     def create_state_proof_payload(self, asserted_value: int) -> bytes:
         proof = self.prover.prove_knowledge(
@@ -126,3 +180,4 @@ class PrivacyAgent:
         commitment, proof = NetworkSerializer.deserialize_proof(payload_bytes)
         is_valid = self.prover.verify_proof(commitment, proof)
         return commitment, is_valid
+

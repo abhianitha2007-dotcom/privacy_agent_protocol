@@ -12,11 +12,17 @@ class PedersenCommitment:
             curve=secp256k1
         )
 
-    def commit(self, value: int) -> tuple[Point, int]:
-        """Generates a commitment C = value*G + blinding_factor*H."""
-        blinding_factor = secrets.randbelow(self.curve.q)
-        commitment = (value * self.G) + (blinding_factor * self.H)
-        return commitment, blinding_factor
+    def commit(self, value: int, blinding_factor: int | None = None) -> tuple[Point, int] | Point:
+        """Generates a commitment C = value*G + blinding_factor*H.
+        
+        If blinding_factor is None, generates a secure random blinding factor and returns (commitment, blinding_factor).
+        If blinding_factor is provided, returns commitment.
+        """
+        if blinding_factor is None:
+            r = secrets.randbelow(self.curve.q - 1) + 1
+            c = (value * self.G) + (r * self.H)
+            return c, r
+        return (value * self.G) + (blinding_factor * self.H)
 
     def verify(self, commitment: Point, value: int, blinding_factor: int) -> bool:
         """Verifies if C == value*G + blinding_factor*H."""
