@@ -1,4 +1,4 @@
-# Privacy-Preserving Multi-Agent Communication Protocol (Topic 9)
+# Privacy-Preserving Multi-Agent Communication Protocol 
 
 A research-grade, asynchronous multi-agent peer-to-peer (P2P) networking and cryptographic protocol strictly adhering to the four core pillars of **Topic 9**: **Identity Hiding**, **Forward Secrecy**, **Anonymous Authentication**, and **Authorization**.
 
