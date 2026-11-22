@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "privacy-preserving-multi-agent-security"
+version = "3.0.0"
+description = "Local research demonstration of signed, encrypted multi-agent messaging and attack defenses"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["cryptography>=41.0,<51.0", "msgpack>=1.0,<2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-asyncio>=0.21"]
+
+[tool.setuptools.packages.find]
+include = ["privacy_agent_protocol*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]
+pythonpath = ["."]

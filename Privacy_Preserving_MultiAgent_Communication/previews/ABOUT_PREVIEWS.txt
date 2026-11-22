@@ -1,0 +1,5 @@
+overview_updated.png = System Overview without decorative mottos.
+unified_workspace_updated.png = Merged Communication & Attack Simulator with dynamic agents, live messages and targeted attack results.
+audit_updated.png = Cryptographic Operations & Security Audit, with detailed evidence inspector.
+mobile_updated.png = Responsive mobile overview.
+All screenshots were captured during Chromium UI checks against the revised frontend and locally bridged Python API actions.
