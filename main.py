@@ -1,100 +1,80 @@
+"""Entrypoint for local multi-agent encrypted messaging and attack experiments."""
+import argparse
 import asyncio
-from privacy_agent_protocol import AsyncPeerNode, PrivacyAgent, MerkleTree, AnonymousRingAuth, ZKRangeProver
 
-async def main():
-    print("==========================================================")
-    print("  TOPIC 9: PRIVACY-PRESERVING MULTI-AGENT PROTOCOL DEMO  ")
-    print("==========================================================\n")
+from privacy_agent_protocol.session import ATTACK_NAMES, ProtocolSession
 
-    # 1. Initialize nodes
-    alice = PrivacyAgent("Alice", initial_balance=3000)
-    bob = PrivacyAgent("Bob", initial_balance=500)
-    eve = PrivacyAgent("Eve", initial_balance=0)
 
-    # 2. Build Merkle tree & Cluster Public Key Ring
-    authorized_cluster_pks = [alice.pk, bob.pk]
-    merkle_tree = MerkleTree(authorized_cluster_pks)
-    cluster_root = merkle_tree.get_root()
+async def demo() -> None:
+    session = ProtocolSession()
+    await session.initialize_defaults()
+    try:
+        print('PRIVACY-PRESERVING MULTI-AGENT COMMUNICATION')
+        print('LOCAL RESEARCH DEMO — no transfers, balances, or settlement features')
+        print('Agents:', ', '.join(a['name'] for a in (await session.get_state())['agents']))
+        sent = await session.send_message('Alice', 'Bob', 'Hello Bob — authenticated encrypted message')
+        print(f'Secure message Alice -> Bob: {sent["status"]} (verified signed receipt: {sent["verified_receipt"]})')
+        print('\nPROTECTED ATTACK EXPERIMENTS')
+        for attack in ATTACK_NAMES:
+            outcome = await session.simulate_attack(attack)
+            print(f'  {outcome["label"]:28} {outcome["observed_status"]:20} {outcome["verdict"]}')
+        print('\nThis does not demonstrate anonymous identities or full forward secrecy.')
+    finally:
+        await session.stop()
 
-    alice.set_cluster_merkle_root(cluster_root)
-    bob.set_cluster_merkle_root(cluster_root)
 
-    print("--- 1. Cluster Setup & Anonymous Ring Authentication ---")
-    print(f"Merkle Cluster Root: {cluster_root.hex()[:16]}...")
+async def cli() -> None:
+    session = ProtocolSession()
+    await session.initialize_defaults()
+    try:
+        print('Multi-Agent Communication CLI. Commands: agents, send, inbox, attack, quit')
+        while True:
+            cmd = input('\nCommand> ').strip().lower()
+            if cmd in {'quit', 'exit', 'q'}:
+                break
+            if cmd == 'agents':
+                for a in (await session.get_state())['agents']:
+                    print(a)
+            elif cmd == 'send':
+                sender = input('Sender: ').strip()
+                recipient = input('Recipient: ').strip()
+                message = input('Message: ')
+                try:
+                    print(await session.send_message(sender, recipient, message))
+                except (ValueError, RuntimeError) as exc:
+                    print('Error:', exc)
+            elif cmd == 'inbox':
+                name = input('Agent name: ').strip()
+                try:
+                    for m in (await session.get_inbox(name))['messages']:
+                        print(f'{m["sender"]} [{m["id"][:8]}]: {m["text"]}')
+                except ValueError as exc:
+                    print('Error:', exc)
+            elif cmd == 'attack':
+                print('Types:', ', '.join(ATTACK_NAMES))
+                kind = input('Type: ').strip().lower()
+                if kind in ATTACK_NAMES:
+                    r = await session.simulate_attack(kind)
+                    print(r['label'], r['observed_status'], r['verdict'])
+                else:
+                    print('Unknown attack')
+            else:
+                print('Commands: agents, send, inbox, attack, quit')
+    finally:
+        await session.stop()
 
-    # Anonymous Ring Authentication: Alice proves membership without disclosing her identity
-    auth_challenge = b"cluster-session-auth-challenge-v1"
-    alice_ring_token = alice.create_anonymous_auth_token(authorized_cluster_pks, auth_challenge)
-    anon_verified = bob.verify_anonymous_auth_token(alice_ring_token, authorized_cluster_pks)
-    print(f"Anonymous Ring Signature verified by Bob? {anon_verified} (Signer identity strictly hidden)")
 
-    # Rogue node Eve attempts to forge anonymous authentication
-    eve_rogue_token = eve.create_anonymous_auth_token([eve.pk, bob.pk], auth_challenge)
-    eve_cluster_verified = bob.verify_anonymous_auth_token(eve_rogue_token, authorized_cluster_pks)
-    print(f"Eve authorized in cluster? {eve_cluster_verified}\n")
-
-    # 3. Start TCP servers for both Alice (9001) and Bob (9002)
-    alice.set_endpoint("127.0.0.1", 9001)
-    async def alice_handler(payload: bytes):
-        res = alice.handle_incoming_payload(payload)
-        print(f"[Alice Node TCP] Received '{res['type']}': {res}")
-
-    alice_node = AsyncPeerNode("127.0.0.1", 9001, alice_handler)
-    await alice_node.start()
-
-    bob.set_endpoint("127.0.0.1", 9002)
-    async def bob_handler(payload: bytes):
-        res = bob.handle_incoming_payload(payload)
-        print(f"[Bob Node TCP] Received '{res['type']}': {res}")
-
-    bob_node = AsyncPeerNode("127.0.0.1", 9002, bob_handler)
-    await bob_node.start()
-
-    # 4. Mutual Handshake
-    print("--- 2. P2P Mutual Handshake ---")
-    await alice.connect_to_peer("127.0.0.1", 9002, "127.0.0.1", 9001)
-    await asyncio.sleep(0.05)
-
-    print("\n--- 3. Wire-Level Stealth Confidential Settlement (AES-GCM AEAD) ---")
-    # Alice sends stealth transfer directly over TCP socket to Bob's port 9002
-    send_ok, wire_payload, stealth_pk, ephemeral_stealth_pk = await alice.send_stealth_transfer(
-        target_host="127.0.0.1",
-        target_port=9002,
-        recipient_pk=bob.pk,
-        amount=700
-    )
-    print(f"Wire transfer transmitted over TCP socket? {send_ok}")
-    x_str, y_str = str(stealth_pk.x), str(stealth_pk.y)
-    print(f"Destination One-Time Stealth Address: Point({x_str[:10]}..., {y_str[:10]}...)")
-    await asyncio.sleep(0.05)  # Allow socket handler to process and settle
-
-    # Eve intercepts the wire payload and attempts to scan/claim Bob's transfer
-    eve_scan = eve.process_stealth_transfer(wire_payload)
-    print(f"Eve able to scan/claim Bob's stealth transfer? {eve_scan}")
-
-    # Replay attack protection test (resending the exact same wire transfer)
-    print("Testing replay attack over TCP socket...")
-    await AsyncPeerNode.send_payload("127.0.0.1", 9002, wire_payload)
-    await asyncio.sleep(0.05)
-
-    print("\n--- 4. Zero-Knowledge Range Proof (CDS 1-of-2 Disjunctive Sigma Proof) ---")
-    from privacy_agent_protocol.crypto.pedersen import PedersenCommitment
-    range_prover = ZKRangeProver(bit_length=16)
-    ped = PedersenCommitment()
-    transfer_amount = 700
-    c_transfer, r_transfer = ped.commit(transfer_amount)
-    bit_proofs, _ = range_prover.prove_range(transfer_amount, r_transfer)
-    zk_range_valid = range_prover.verify_range(c_transfer, bit_proofs)
-    print(f"Confidential transfer amount [0, 2^16) verified via CDS ZK Range Proof? {zk_range_valid}")
-
-    print("\n--- 5. Final Cryptographic State Verification ---")
-    print(f"Alice's balance equals 2300? {alice.account.verify_balance(2300)}")
-    print(f"Bob's balance equals 1200? {bob.account.verify_balance(1200)}")
-
-    await alice_node.stop()
-    await bob_node.stop()
-    print("\nAll nodes shut down cleanly. Demo complete.")
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Privacy-Preserving Multi-Agent Communication: local security lab')
+    parser.add_argument('--web', action='store_true', help='Run integrated dashboard and API')
+    parser.add_argument('--cli', action='store_true', help='Interactive terminal')
+    parser.add_argument('--simulate', action='store_true', help='Run console protocol and attack demo')
+    parser.add_argument('--port', type=int, default=8000, help='Dashboard port, loopback only')
+    args = parser.parse_args()
+    if args.web:
+        from web_app import run_server
+        run_server(args.port)
+    elif args.cli:
+        asyncio.run(cli())
+    else:
+        asyncio.run(demo())
