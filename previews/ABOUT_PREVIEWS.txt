@@ -1,0 +1,5 @@
+Preview screenshots represent visual examples; the new topology screenshots were captured with browser test data (Charlie agent, test message and replay) rather than user private data.
+previews/new_full_network_desktop.png: unified topology attack page with all agents.
+previews/new_full_network_mobile.png: responsive full topology and controls.
+previews/new_topology_browser_preview.png: long-form view with test-agent registration and replay.
+Original overview and audit page visual references remain included.

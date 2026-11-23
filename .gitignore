@@ -1,4 +1,35 @@
+# Python virtual environments and caches
+.venv/
 venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
-*.pyc
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local security audit records (may contain identifying metadata)
+data/*.jsonl
+data/previous_sessions/
+data/*.db
+data/*.sqlite*
+*.log
+
+# Secrets and private key material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
